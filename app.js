@@ -73,17 +73,17 @@ function computeStandings(drivers, latestResultsByDriver) {
 }
 
 async function updateStandings() {
-  // 1) latest results per driver → compute places and current CP/PI/penalty
+  // latest results per driver → compute places and current CP/PI/penalty
   const latest = await fetchLatestResultsPerDriver();
   computeStandings(drivers, latest);
 
-  // 2) build the championship grid
+  // grid data
   const races = await fetchRaces();
   const allResults = await fetchAllResults();
-  const resultMap = indexResultsByRaceAndDriver(allResults);
+  const resultMap = indexResultsByDriverAndRace(allResults);
+
   renderGrid(drivers, races, resultMap);
 }
-
 
 async function fetchRaces() {
   const { data, error } = await supabaseClient
@@ -112,11 +112,11 @@ async function fetchAllResults() {
   return data;
 }
 
-function indexResultsByRaceAndDriver(results) {
-  const map = {}; // key: `${race_id}_${driver_id}`
+function indexResultsByDriverAndRace(results) {
+  const map = {}; // key: driverId_raceId
 
   for (const r of results) {
-    const key = `${r.race_id}_${r.driver_id}`;
+    const key = `${r.driver_id}_${r.race_id}`;
     map[key] = r;
   }
 
@@ -130,64 +130,65 @@ function renderGrid(drivers, races, resultMap) {
   headerRow.innerHTML = '';
   tbody.innerHTML = '';
 
-  // Header: first cell "Race"
-  const raceHeaderTh = document.createElement('th');
-  raceHeaderTh.textContent = 'Race';
-  headerRow.appendChild(raceHeaderTh);
+  // Header: first cell is the "Drivers" column
+  const firstTh = document.createElement('th');
+  firstTh.textContent = 'Driver / Race';
+  headerRow.appendChild(firstTh);
 
-  // Then one header cell per driver (place + name + car)
-  for (const driver of drivers) {
-    const th = document.createElement('th');
-    const placeText = driver.place ? `${driver.place}. ` : '';
-
-  const effectivePi = driver.effective_pi ?? driver.current_pi ?? 0;
-
-  th.innerHTML = `
-    <div>${placeText}${driver.name}</div>
-    <div style="font-size: 0.85em; opacity: 0.8;">${driver.car}</div>
-    <div style="font-size: 0.8em; opacity: 0.8; margin-top:2px;">
-      CP: ${driver.current_cp} | PI: ${effectivePi}
-    </div>
-  `;
-
-    headerRow.appendChild(th);
-  }
-
-  // One row per race
+  // Then one header cell per race, left to right
   for (const race of races) {
-    const tr = document.createElement('tr');
-
-    const raceCell = document.createElement('td');
+    const th = document.createElement('th');
     const raceLabel = race.name ? race.name : `Race ${race.round_number}`;
-    raceCell.innerHTML = `
+
+    th.innerHTML = `
       <div>${raceLabel}</div>
       <div style="font-size:0.85em; opacity:0.7;">CP | PI | Pen</div>
     `;
-    tr.appendChild(raceCell);
+    headerRow.appendChild(th);
+  }
 
-    // One cell per driver
-    for (const driver of drivers) {
+  // Body: one row per driver (in current standings order)
+  for (const driver of drivers) {
+    const tr = document.createElement('tr');
+
+    // Left cell: place, name, car, and current CP/PI after penalty
+    const leftTd = document.createElement('td');
+    const placeText = driver.place ? `${driver.place}. ` : '';
+    const effectivePi = driver.effective_pi ?? driver.current_pi ?? 0;
+
+    leftTd.innerHTML = `
+      <div>${placeText}${driver.name}</div>
+      <div style="font-size:0.85em; opacity:0.8;">${driver.car}</div>
+      <div style="font-size:0.8em; opacity:0.8; margin-top:2px;">
+        CP: ${driver.current_cp ?? 0} | PI: ${effectivePi}
+      </div>
+    `;
+    tr.appendChild(leftTd);
+
+    // Then one cell per race for this driver
+    for (const race of races) {
       const td = document.createElement('td');
-      const key = `${race.id}_${driver.id}`;
+      const key = `${driver.id}_${race.id}`;
       const r = resultMap[key];
 
       if (!r) {
         td.innerHTML = '<div style="opacity:0.4;">-</div>';
       } else {
-        const cpBefore = r.cp_before ?? 0;
-        const piBefore = r.pi_before ?? 0;
-        const penBefore = r.penalty_before ?? 0;
+        const cpBefore   = r.cp_before ?? 0;
+        const piBefore   = r.pi_before ?? 0;
+        const penBefore  = r.penalty_before ?? 0;
 
-        const cpAfter = r.cp_after ?? cpBefore;
-        const piAfter = r.pi_after ?? piBefore;
-        const penNext = r.penalty_for_next ?? penBefore;
+        const cpAfter    = r.cp_after ?? cpBefore;
+        const piAfter    = r.pi_after ?? piBefore;
+        const penNext    = r.penalty_for_next ?? penBefore;
 
+        // This-race change
         const dCp  = cpAfter - cpBefore;
         const dPi  = piAfter - piBefore;
         const dPen = penNext - penBefore;
 
-        // Top line: change in this race
-        // Bottom line: current values before this race
+        // Top: per-race change
+        // Bottom: current values before this race
         td.innerHTML = `
           <div>${dCp} | ${dPi} | ${dPen}</div>
           <div style="font-size:0.85em; opacity:0.8;">
