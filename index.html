@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Championship Standings</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <h1>Championship Standings</h1>
+
+  <!-- Admin login section -->
+  <section id="login-section">
+    <h2>Admin login</h2>
+    <input id="login-email" type="email" placeholder="Email">
+    <input id="login-password" type="password" placeholder="Password">
+    <button id="login-button">Login</button>
+    <button id="logout-button" style="display:none;">Logout</button>
+    <p id="login-status"></p>
+  </section>
+
+  <hr>
+
+  <!-- Standings section -->
+  <section id="standings-section">
+    <h2>Current Standings</h2>
+    <button id="update-standings-button">Update standings</button>
+    <table id="standings-table">
+      <thead>
+        <tr>
+          <th>Place</th>
+          <th>Driver</th>
+          <th>Car</th>
+          <th>Current CP</th>
+          <th>Current PI</th>
+          <th>Current Penalty</th>
+          <th>Effective CP (after penalty)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <!-- rows will be injected by JS -->
+      </tbody>
+    </table>
+  </section>
+
+  <!-- Supabase JS from CDN -->
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+
+  <!-- App script -->
+  <script>
+    // TODO: replace these with your actual values from Supabase
+    const SUPABASE_URL = 'https://pyafbnzrasmamwkdhvid.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB5YWZibnpyYXNtYW13a2RodmlkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjUwOTEwOTIsImV4cCI6MjA4MDY2NzA5Mn0.914pws70_UfbXOzJWcIEsfwRRXgv9UdfGJGG-';
+
+    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  </script>
+  <script src="app.js"></script>
+</body>
+</html>
