@@ -32,3 +32,43 @@ th {
   margin-top: 5px;
   font-size: 0.9em;
 }
+
+/* Dark mode overrides */
+body.dark {
+  background: #121212;
+  color: #e0e0e0;
+}
+
+/* Tables */
+body.dark table {
+  border-color: #333;
+}
+
+body.dark th,
+body.dark td {
+  border: 1px solid #333;
+}
+
+body.dark th {
+  background: #1f1f1f;
+}
+
+/* Inputs / buttons in login section (and generally) */
+body.dark input,
+body.dark select,
+body.dark button,
+body.dark textarea {
+  background: #1e1e1e;
+  color: #e0e0e0;
+  border: 1px solid #555;
+}
+
+body.dark input::placeholder,
+body.dark textarea::placeholder {
+  color: #888;
+}
+
+/* Optional: subtle status text color */
+body.dark #login-status {
+  color: #b0b0b0;
+}
