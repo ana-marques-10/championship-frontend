@@ -20,6 +20,65 @@ async function refreshAdminStatus() {
   isAdmin = !adminError && !!data;
 }
 
+async function createDriver(name, car) {
+  const { error } = await supabaseClient
+    .from('drivers')
+    .insert({
+      name: name,
+      car: car,
+      active: true,
+      championship_id: CURRENT_CHAMPIONSHIP_ID
+    });
+
+  if (error) {
+    console.error("Error creating driver:", error.message);
+    alert("Error: " + error.message);
+  }
+}
+
+async function deleteDriver(driverId) {
+  const { error } = await supabaseClient
+    .from('drivers')
+    .delete()
+    .eq('id', driverId);
+
+  if (error) {
+    console.error("Error deleting driver:", error.message);
+    alert("Delete failed: " + error.message);
+  }
+}
+function renderDriversAdmin(drivers) {
+  const container = document.getElementById('drivers-admin-list');
+  if (!container) return;
+
+  if (!isAdmin) {
+    container.innerHTML = "<em>Login as admin to edit drivers.</em>";
+    return;
+  }
+
+  if (!drivers || drivers.length === 0) {
+    container.innerHTML = "<em>No drivers yet.</em>";
+    return;
+  }
+
+  let html = "<ul style='list-style:none; padding-left:0;'>";
+
+  for (const d of drivers) {
+    html += `
+      <li style="margin: 4px 0;">
+        ${d.name} (${d.car})
+        <button class="driver-delete-btn" data-driver-id="${d.id}">
+          Remove
+        </button>
+      </li>
+    `;
+  }
+
+  html += "</ul>";
+
+  container.innerHTML = html;
+}
+
 async function fetchDrivers() {
   const { data, error } = await supabaseClient
     .from('drivers')
@@ -92,17 +151,22 @@ function computeStandings(drivers, latestResultsByDriver) {
 }
 
 async function updateStandings() {
-  // latest results per driver → compute places and current CP/PI/penalty
+  // 1) latest results per driver → compute places and current CP/PI/penalty
   const latest = await fetchLatestResultsPerDriver();
   computeStandings(drivers, latest);
 
-  // grid data
+  // 2) fetch full grid data
   const races = await fetchRaces();
   const allResults = await fetchAllResults();
   const resultMap = indexResultsByDriverAndRace(allResults);
 
+  // 3) render main championship grid
   renderGrid(drivers, races, resultMap);
+
+  // 4) render drivers admin panel
+  renderDriversAdmin(drivers);
 }
+
 
 async function fetchRaces() {
   const { data, error } = await supabaseClient
@@ -320,6 +384,59 @@ document.addEventListener('DOMContentLoaded', async () => {
   const logoutBtn = document.getElementById('logout-button');
   if (logoutBtn) {
     logoutBtn.addEventListener('click', logout);
+  }
+
+  // Add-driver button
+  const addBtn = document.getElementById("add-driver-button");
+  if (addBtn) {
+    addBtn.addEventListener("click", async () => {
+      if (!isAdmin) {
+        alert("Only admins can add drivers.");
+        return;
+      }
+  
+      const name = document.getElementById("new-driver-name").value.trim();
+      const car = document.getElementById("new-driver-car").value.trim();
+  
+      if (!name || !car) {
+        alert("Driver name and car are required.");
+        return;
+      }
+  
+      await createDriver(name, car);
+  
+      // Reload drivers + grid
+      drivers = await fetchDrivers();
+      await updateStandings();
+      renderDriversAdmin(drivers);
+  
+      document.getElementById("new-driver-name").value = "";
+      document.getElementById("new-driver-car").value = "";
+    });
+  }
+  
+  // Driver delete buttons (event delegation)
+  const driversAdminDiv = document.getElementById("drivers-admin-list");
+  if (driversAdminDiv) {
+    driversAdminDiv.addEventListener("click", async (e) => {
+      const btn = e.target.closest(".driver-delete-btn");
+      if (!btn) return;
+  
+      if (!isAdmin) {
+        alert("Only admins can delete drivers.");
+        return;
+      }
+  
+      const driverId = btn.dataset.driverId;
+  
+      if (confirm("Are you sure you want to remove this driver?")) {
+        await deleteDriver(driverId);
+  
+        drivers = await fetchDrivers();
+        await updateStandings();
+        renderDriversAdmin(drivers);
+      }
+    });
   }
 
   // event delegation for Save buttons inside cells
