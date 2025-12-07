@@ -72,53 +72,12 @@ function computeStandings(drivers, latestResultsByDriver) {
   }
 }
 
-function renderStandings(drivers) {
-  const tbody = document.querySelector('#standings-table tbody');
-  tbody.innerHTML = '';
-
-  for (const driver of drivers) {
-    const tr = document.createElement('tr');
-
-    const placeTd = document.createElement('td');
-    placeTd.textContent = driver.place ?? '-';
-
-    const nameTd = document.createElement('td');
-    nameTd.textContent = driver.name;
-
-    const carTd = document.createElement('td');
-    carTd.textContent = driver.car;
-
-    const currentCpTd = document.createElement('td');
-    currentCpTd.textContent = driver.current_cp ?? 0;
-
-    const currentPiTd = document.createElement('td');
-    currentPiTd.textContent = driver.current_pi ?? 0;
-
-    const penaltyTd = document.createElement('td');
-    penaltyTd.textContent = driver.current_penalty ?? 0;
-
-    const effectiveCpTd = document.createElement('td');
-    effectiveCpTd.textContent = driver.effective_cp ?? 0;
-
-    tr.appendChild(placeTd);
-    tr.appendChild(nameTd);
-    tr.appendChild(carTd);
-    tr.appendChild(currentCpTd);
-    tr.appendChild(currentPiTd);
-    tr.appendChild(penaltyTd);
-    tr.appendChild(effectiveCpTd);
-
-    tbody.appendChild(tr);
-  }
-}
-
 async function updateStandings() {
-  // 1) latest results per driver → standings
+  // 1) latest results per driver → compute places and current CP/PI/penalty
   const latest = await fetchLatestResultsPerDriver();
   computeStandings(drivers, latest);
-  renderStandings(drivers);
 
-  // 2) championship grid
+  // 2) build the championship grid
   const races = await fetchRaces();
   const allResults = await fetchAllResults();
   const resultMap = indexResultsByRaceAndDriver(allResults);
