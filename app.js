@@ -319,7 +319,7 @@ async function createRace(name, dateString) {
       championship_id: CURRENT_CHAMPIONSHIP_ID
     })
     .select()
-    .single();   // IMPORTANT: gets the inserted race
+    .single();
 
   if (insertError) {
     console.error('Error creating race:', insertError.message);
@@ -329,28 +329,6 @@ async function createRace(name, dateString) {
 
   // STEP 4: Automatically create default results for every driver
   await createDefaultResultsForRace(newRace.id);
-}
-
-
-  const maxRound = existing && existing.length > 0 ? existing[0].round_number : 0;
-  const nextRound = (maxRound || 0) + 1;
-
-  const displayName = name && name.trim() ? name.trim() : `Race ${nextRound}`;
-  const raceDate = dateString && dateString.trim() ? dateString.trim() : null;
-
-  const { error } = await supabaseClient
-    .from('races')
-    .insert({
-      round_number: nextRound,
-      name: displayName,
-      race_date: raceDate,
-      championship_id: CURRENT_CHAMPIONSHIP_ID
-    });
-
-  if (error) {
-    console.error('Error creating race:', error.message);
-    alert('Error creating race: ' + error.message);
-  }
 }
 
 function renderGrid(drivers, races, resultMap) {
