@@ -165,8 +165,9 @@ async function updateStandings() {
 
   // 4) render drivers admin panel
   renderDriversAdmin(drivers);
-}
 
+  renderRacesAdmin(races);
+}
 
 async function fetchRaces() {
   const { data, error } = await supabaseClient
@@ -182,6 +183,54 @@ async function fetchRaces() {
 
   return data;
 }
+
+async function deleteRace(raceId) {
+  const { error } = await supabaseClient
+    .from('races')
+    .delete()
+    .eq('id', raceId);
+
+  if (error) {
+    console.error('Error deleting race:', error.message);
+    alert('Delete failed: ' + error.message);
+  }
+}
+
+function renderRacesAdmin(races) {
+  const container = document.getElementById('races-admin-list');
+  if (!container) return;
+
+  if (!isAdmin) {
+    container.innerHTML = '<em>Login as admin to edit races.</em>';
+    return;
+  }
+
+  if (!races || races.length === 0) {
+    container.innerHTML = '<em>No races yet.</em>';
+    return;
+  }
+
+  let html = "<ul style='list-style:none; padding-left:0;'>";
+
+  for (const r of races) {
+    const label = r.name ? r.name : `Race ${r.round_number}`;
+    const dateText = r.race_date ? ` (${r.race_date})` : '';
+
+    html += `
+      <li style="margin: 4px 0;">
+        ${r.round_number}. ${label}${dateText}
+        <button class="race-delete-btn" data-race-id="${r.id}">
+          Remove
+        </button>
+      </li>
+    `;
+  }
+
+  html += "</ul>";
+
+  container.innerHTML = html;
+}
+
 
 async function fetchAllResults() {
   const { data, error } = await supabaseClient
@@ -203,6 +252,42 @@ function indexResultsByDriverAndRace(results) {
     map[key] = r;
   }
   return map;
+}
+
+async function createRace(name, dateString) {
+  // get current max round_number for this championship
+  const { data: existing, error: fetchError } = await supabaseClient
+    .from('races')
+    .select('round_number')
+    .eq('championship_id', CURRENT_CHAMPIONSHIP_ID)
+    .order('round_number', { ascending: false })
+    .limit(1);
+
+  if (fetchError) {
+    console.error('Error reading races:', fetchError.message);
+    alert('Could not read races: ' + fetchError.message);
+    return;
+  }
+
+  const maxRound = existing && existing.length > 0 ? existing[0].round_number : 0;
+  const nextRound = (maxRound || 0) + 1;
+
+  const displayName = name && name.trim() ? name.trim() : `Race ${nextRound}`;
+  const raceDate = dateString && dateString.trim() ? dateString.trim() : null;
+
+  const { error } = await supabaseClient
+    .from('races')
+    .insert({
+      round_number: nextRound,
+      name: displayName,
+      race_date: raceDate,
+      championship_id: CURRENT_CHAMPIONSHIP_ID
+    });
+
+  if (error) {
+    console.error('Error creating race:', error.message);
+    alert('Error creating race: ' + error.message);
+  }
 }
 
 function renderGrid(drivers, races, resultMap) {
@@ -438,6 +523,63 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
     });
   }
+
+  // Add-race button
+const addRaceBtn = document.getElementById('add-race-button');
+if (addRaceBtn) {
+  addRaceBtn.addEventListener('click', async () => {
+    if (!isAdmin) {
+      alert('Only admins can add races.');
+      return;
+    }
+
+    const nameInput = document.getElementById('new-race-name');
+    const dateInput = document.getElementById('new-race-date');
+
+    const name = nameInput.value.trim();
+    const date = dateInput.value;
+
+    await createRace(name, date);
+
+    const races = await fetchRaces();
+    const allResults = await fetchAllResults();
+    const resultMap = indexResultsByDriverAndRace(allResults);
+
+    // grid + admin sections
+    renderGrid(drivers, races, resultMap);
+    renderRacesAdmin(races);
+
+    nameInput.value = '';
+    dateInput.value = '';
+  });
+}
+
+// Race delete buttons (event delegation)
+const racesAdminDiv = document.getElementById('races-admin-list');
+if (racesAdminDiv) {
+  racesAdminDiv.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.race-delete-btn');
+    if (!btn) return;
+
+    if (!isAdmin) {
+      alert('Only admins can delete races.');
+      return;
+    }
+
+    const raceId = btn.dataset.raceId;
+
+    if (confirm('Are you sure you want to remove this race (and its results)?')) {
+      await deleteRace(raceId);
+
+      const races = await fetchRaces();
+      const allResults = await fetchAllResults();
+      const resultMap = indexResultsByDriverAndRace(allResults);
+
+      renderGrid(drivers, races, resultMap);
+      renderRacesAdmin(races);
+    }
+  });
+}
 
   // event delegation for Save buttons inside cells
   const gridBody = document.getElementById('grid-body');
