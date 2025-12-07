@@ -20,7 +20,6 @@ async function fetchLatestResultsPerDriver() {
   const { data, error } = await supabaseClient
     .from('results')
     .select('driver_id, cp_after, pi_after, penalty_for_next, races(round_number)');
-    // remove the .order(...) line completely
 
   if (error) {
     console.error('Error fetching results:', error.message);
