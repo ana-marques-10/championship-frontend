@@ -41,7 +41,6 @@ async function fetchLatestResultsPerDriver() {
 }
 
 function computeStandings(drivers, latestResultsByDriver) {
-  // attach current values to each driver
   for (const driver of drivers) {
     const latest = latestResultsByDriver[driver.id];
 
@@ -49,7 +48,7 @@ function computeStandings(drivers, latestResultsByDriver) {
       driver.current_cp = 0;
       driver.current_pi = 0;
       driver.current_penalty = 0;
-      driver.effective_cp = 0;
+      driver.effective_pi = 0;
     } else {
       const cpAfter = latest.cp_after ?? 0;
       const piAfter = latest.pi_after ?? 0;
@@ -58,14 +57,15 @@ function computeStandings(drivers, latestResultsByDriver) {
       driver.current_cp = cpAfter;
       driver.current_pi = piAfter;
       driver.current_penalty = penaltyNext;
-      driver.effective_cp = cpAfter - penaltyNext;
+
+      // Penalty applies to PI (max tuning points)
+      driver.effective_pi = Math.max(0, piAfter - penaltyNext);
     }
   }
 
-  // sort by effective_cp descending
-  drivers.sort((a, b) => b.effective_cp - a.effective_cp);
+  // CP decides the place
+  drivers.sort((a, b) => b.current_cp - a.current_cp);
 
-  // assign place numbers
   let place = 1;
   for (const driver of drivers) {
     driver.place = place++;
@@ -176,25 +176,34 @@ function renderGrid(drivers, races, resultMap) {
   raceHeaderTh.textContent = 'Race';
   headerRow.appendChild(raceHeaderTh);
 
-  // Then one cell per driver (in current standings order)
+  // Then one header cell per driver (place + name + car)
   for (const driver of drivers) {
     const th = document.createElement('th');
     const placeText = driver.place ? `${driver.place}. ` : '';
 
-    th.innerHTML = `
-      <div>${placeText}${driver.name}</div>
-      <div style="font-size: 0.85em; opacity: 0.8;">${driver.car}</div>
-    `;
+  const effectivePi = driver.effective_pi ?? driver.current_pi ?? 0;
+
+  th.innerHTML = `
+    <div>${placeText}${driver.name}</div>
+    <div style="font-size: 0.85em; opacity: 0.8;">${driver.car}</div>
+    <div style="font-size: 0.8em; opacity: 0.8; margin-top:2px;">
+      CP: ${driver.current_cp} | PI: ${effectivePi}
+    </div>
+  `;
+
     headerRow.appendChild(th);
   }
 
-  // Body: one row per race
+  // One row per race
   for (const race of races) {
     const tr = document.createElement('tr');
 
     const raceCell = document.createElement('td');
     const raceLabel = race.name ? race.name : `Race ${race.round_number}`;
-    raceCell.textContent = raceLabel;
+    raceCell.innerHTML = `
+      <div>${raceLabel}</div>
+      <div style="font-size:0.85em; opacity:0.7;">CP | PI | Pen</div>
+    `;
     tr.appendChild(raceCell);
 
     // One cell per driver
@@ -206,24 +215,24 @@ function renderGrid(drivers, races, resultMap) {
       if (!r) {
         td.innerHTML = '<div style="opacity:0.4;">-</div>';
       } else {
-        const cpBefore = r.cp_before ?? '';
-        const piBefore = r.pi_before ?? '';
-        const penBefore = r.penalty_before ?? '';
+        const cpBefore = r.cp_before ?? 0;
+        const piBefore = r.pi_before ?? 0;
+        const penBefore = r.penalty_before ?? 0;
 
-        const cpAfter = r.cp_after ?? '';
-        const piAfter = r.pi_after ?? '';
-        const penNext = r.penalty_for_next ?? '';
+        const cpAfter = r.cp_after ?? cpBefore;
+        const piAfter = r.pi_after ?? piBefore;
+        const penNext = r.penalty_for_next ?? penBefore;
 
+        const dCp  = cpAfter - cpBefore;
+        const dPi  = piAfter - piBefore;
+        const dPen = penNext - penBefore;
+
+        // Top line: change in this race
+        // Bottom line: current values before this race
         td.innerHTML = `
-          <div>
-            CP: <strong>${cpAfter}</strong>,
-            PI: <strong>${piAfter}</strong>,
-            Penalty→ <strong>${penNext}</strong>
-          </div>
+          <div>${dCp} | ${dPi} | ${dPen}</div>
           <div style="font-size:0.85em; opacity:0.8;">
-            Prev CP: ${cpBefore},
-            Prev PI: ${piBefore},
-            Prev Pen: ${penBefore}
+            ${cpBefore} | ${piBefore} | ${penBefore}
           </div>
         `;
       }
