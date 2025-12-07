@@ -21,31 +21,94 @@ async function refreshAdminStatus() {
 }
 
 async function createDefaultResultsForRace(raceId) {
-  // fetch all drivers in the current championship
-  const { data: drivers, error } = await supabaseClient
-    .from('drivers')
-    .select('id')
-    .eq('championship_id', CURRENT_CHAMPIONSHIP_ID);
+  // 1) Get round_number for this race
+  const { data: race, error: raceError } = await supabaseClient
+    .from('races')
+    .select('round_number')
+    .eq('id', raceId)
+    .single();
 
-  if (error) {
-    console.error('Error fetching drivers:', error.message);
+  if (raceError) {
+    console.error('Error fetching race info:', raceError.message);
     return;
   }
 
-  const rows = drivers.map(d => ({
-    driver_id: d.id,
-    race_id: raceId,
-    cp_before: 0,
-    pi_before: 0,
-    penalty_before: 0,
-    cp_after: 0,
-    pi_after: 0,
-    penalty_for_next: 0
-  }));
+  const currentRound = race.round_number;
 
+  // 2) Get all active drivers in this championship
+  const { data: driverRows, error: driversError } = await supabaseClient
+    .from('drivers')
+    .select('id')
+    .eq('championship_id', CURRENT_CHAMPIONSHIP_ID)
+    .eq('active', true);
+
+  if (driversError) {
+    console.error('Error fetching drivers:', driversError.message);
+    return;
+  }
+
+  // 3) Get the latest result *before* this round for each driver
+  //    (so we can prefill cp_before/pi_before/penalty_before)
+  const { data: prevResults, error: prevError } = await supabaseClient
+    .from('results')
+    .select('driver_id, cp_after, pi_after, penalty_for_next, races(round_number)')
+    .lt('races.round_number', currentRound); // only earlier rounds
+
+  if (prevError) {
+    console.error('Error fetching previous results:', prevError.message);
+    return;
+  }
+
+  // Build "latest per driver" map
+  const latestByDriver = {};
+  for (const row of prevResults || []) {
+    const dId = row.driver_id;
+    const round = row.races?.round_number ?? 0;
+
+    if (!latestByDriver[dId] || round > (latestByDriver[dId].races?.round_number ?? 0)) {
+      latestByDriver[dId] = row;
+    }
+  }
+
+  // 4) Prepare insert rows
+  const rowsToInsert = driverRows.map(d => {
+    const latest = latestByDriver[d.id];
+
+    if (!latest) {
+      // No previous race for this driver:
+      // Race 1 → all "before" start at 0, user can edit PI manually.
+      return {
+        driver_id: d.id,
+        race_id: raceId,
+        cp_before: 0,
+        pi_before: 0,
+        penalty_before: 0,
+        cp_after: 0,
+        pi_after: 0,
+        penalty_for_next: 0
+      };
+    } else {
+      // There is a previous race:
+      // prefill "before" with previous AFTER values
+      return {
+        driver_id: d.id,
+        race_id: raceId,
+        cp_before: latest.cp_after ?? 0,
+        pi_before: latest.pi_after ?? 0,
+        penalty_before: latest.penalty_for_next ?? 0,
+
+        // start "after" equal to "before" (so delta = 0 until edited)
+        cp_after: latest.cp_after ?? 0,
+        pi_after: latest.pi_after ?? 0,
+        penalty_for_next: latest.penalty_for_next ?? 0
+      };
+    }
+  });
+
+  // 5) Insert all default rows for this race
   const { error: insertError } = await supabaseClient
     .from('results')
-    .insert(rows);
+    .insert(rowsToInsert);
 
   if (insertError) {
     console.error('Error inserting default results:', insertError.message);
@@ -328,8 +391,12 @@ async function createRace(name, dateString) {
   }
 
   // STEP 4: Automatically create default results for every driver
-  await createDefaultResultsForRace(newRace.id);
+  // Pass nextRound so we know which earlier results to sum from
+  await createDefaultResultsForRace(newRace.id, nextRound);
+
+  return newRace;
 }
+
 
 function renderGrid(drivers, races, resultMap) {
   const headerRow = document.getElementById('grid-header-row');
