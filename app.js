@@ -397,7 +397,6 @@ async function createRace(name, dateString) {
   return newRace;
 }
 
-
 function renderGrid(drivers, races, resultMap) {
   const headerRow = document.getElementById('grid-header-row');
   const tbody = document.getElementById('grid-body');
