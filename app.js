@@ -21,7 +21,7 @@ async function refreshAdminStatus() {
 }
 
 async function createDefaultResultsForRace(raceId, roundNumber) {
-  // 1) All active drivers
+  // 1) All active drivers in this championship
   const { data: driverRows, error: driversError } = await supabaseClient
     .from('drivers')
     .select('id')
@@ -52,13 +52,17 @@ async function createDefaultResultsForRace(raceId, roundNumber) {
     previousRaceIds.push(r.id);
   }
 
-  // 3) Latest per driver
+  // 3) Latest result row (by round) for each driver from previous races
   const latestByDriver = {};
 
   if (previousRaceIds.length > 0) {
     const { data: prevResults, error: prevResError } = await supabaseClient
       .from('results')
-      .select('driver_id, race_id, cp_after, pi_after, penalty_for_next')
+      .select(
+        'driver_id, race_id, ' +
+        'cp_before, pi_before, penalty_before, ' +
+        'cp_after,  pi_after,  penalty_for_next'
+      )
       .in('race_id', previousRaceIds);
 
     if (prevResError) {
@@ -74,44 +78,64 @@ async function createDefaultResultsForRace(raceId, roundNumber) {
       if (!latestByDriver[dId] || round > latestByDriver[dId].round_number) {
         latestByDriver[dId] = {
           round_number: round,
-          cp_after: row.cp_after,
-          pi_after: row.pi_after,
-          penalty_for_next: row.penalty_for_next
+          cp_before: row.cp_before ?? 0,
+          pi_before: row.pi_before ?? 0,
+          penalty_before: row.penalty_before ?? 0,
+          cp_after: row.cp_after ?? 0,
+          pi_after: row.pi_after ?? 0,
+          penalty_for_next: row.penalty_for_next ?? 0
         };
       }
     }
   }
 
-  // 4) Build insert rows
+  // 4) Build rows to insert for the new race
   const rowsToInsert = driverRows.map(d => {
     const latest = latestByDriver[d.id];
 
     if (!latest) {
+      // First race for this driver:
+      // bottom row will be edited manually in race 1
       return {
         driver_id: d.id,
         race_id: raceId,
+
         cp_before: 0,
         pi_before: 0,
         penalty_before: 0,
+
+        // top row starts empty – admin fills per race
         cp_after: 0,
         pi_after: 0,
         penalty_for_next: 0
       };
     }
 
+    // Later races: cumulative totals
+    const cpBeforeNew =
+      (latest.cp_before ?? 0) + (latest.cp_after ?? 0);
+    const piBeforeNew =
+      (latest.pi_before ?? 0) + (latest.pi_after ?? 0);
+    const penBeforeNew =
+      (latest.penalty_before ?? 0) + (latest.penalty_for_next ?? 0);
+
     return {
       driver_id: d.id,
       race_id: raceId,
-      cp_before: latest.cp_after ?? 0,
-      pi_before: latest.pi_after ?? 0,
-      penalty_before: latest.penalty_for_next ?? 0,
-      cp_after: latest.cp_after ?? 0,
-      pi_after: latest.pi_after ?? 0,
-      penalty_for_next: latest.penalty_for_next ?? 0
+
+      // bottom row = previous bottom + previous top
+      cp_before: cpBeforeNew,
+      pi_before: piBeforeNew,
+      penalty_before: penBeforeNew,
+
+      // top row starts blank for the new race
+      cp_after: 0,
+      pi_after: 0,
+      penalty_for_next: 0
     };
   });
 
-  // 5) Insert
+  // 5) Insert all default rows for this race
   const { error: insertError } = await supabaseClient
     .from('results')
     .insert(rowsToInsert);
