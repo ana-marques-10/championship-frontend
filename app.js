@@ -234,7 +234,7 @@ async function fetchLatestResultsPerDriver() {
 
   const latest = {};
 
-  for (const row of data) {
+  for (const row of (data || [])) {
     const dId = row.driver_id;
     const round = row.races?.round_number ?? 0;
 
@@ -245,6 +245,7 @@ async function fetchLatestResultsPerDriver() {
 
   return latest;
 }
+
 
 function computeStandings(drivers, latestResultsByDriver) {
   for (const driver of drivers) {
@@ -265,24 +266,30 @@ function computeStandings(drivers, latestResultsByDriver) {
       const totalCp = cpBefore + cpAfter;
       const totalPi = piBefore + piAfter;
 
-      // totals used for left column
+      // These are what you show under the driver name
       driver.current_cp = totalCp;
       driver.current_pi = totalPi;
       driver.current_penalty = penNext;
 
-      // “effective” PI after applying NEXT penalty, if you want to show it
+      // Optional: PI after applying next-race penalty
       driver.effective_pi = Math.max(0, totalPi - penNext);
     }
   }
 
-  // order drivers by TOTAL CP (descending)
-  drivers.sort((a, b) => b.current_cp - a.current_cp);
+  // Order by TOTAL CP (then by total PI as tie-breaker)
+  drivers.sort((a, b) => {
+    if (b.current_cp !== a.current_cp) {
+      return b.current_cp - a.current_cp;
+    }
+    return b.current_pi - a.current_pi;
+  });
 
   let place = 1;
   for (const driver of drivers) {
     driver.place = place++;
   }
 }
+
 
 async function updateStandings() {
   // 1) latest results per driver → compute places and current CP/PI/penalty
