@@ -21,7 +21,7 @@ async function refreshAdminStatus() {
 }
 
 async function createDefaultResultsForRace(raceId, roundNumber) {
-  // 1) All active drivers for this championship
+  // 1) All active drivers
   const { data: driverRows, error: driversError } = await supabaseClient
     .from('drivers')
     .select('id')
@@ -33,7 +33,7 @@ async function createDefaultResultsForRace(raceId, roundNumber) {
     return;
   }
 
-  // 2) All earlier races in this championship
+  // 2) All earlier races
   const { data: previousRaces, error: prevRaceError } = await supabaseClient
     .from('races')
     .select('id, round_number')
@@ -52,7 +52,7 @@ async function createDefaultResultsForRace(raceId, roundNumber) {
     previousRaceIds.push(r.id);
   }
 
-  // 3) Latest result per driver from previous races
+  // 3) Latest per driver
   const latestByDriver = {};
 
   if (previousRaceIds.length > 0) {
@@ -82,12 +82,11 @@ async function createDefaultResultsForRace(raceId, roundNumber) {
     }
   }
 
-  // 4) Build rows to insert for the new race
+  // 4) Build insert rows
   const rowsToInsert = driverRows.map(d => {
     const latest = latestByDriver[d.id];
 
     if (!latest) {
-      // First race for this driver: "before" starts at 0
       return {
         driver_id: d.id,
         race_id: raceId,
@@ -100,80 +99,19 @@ async function createDefaultResultsForRace(raceId, roundNumber) {
       };
     }
 
-    // Later races: carry over previous AFTER values
     return {
       driver_id: d.id,
       race_id: raceId,
-
       cp_before: latest.cp_after ?? 0,
       pi_before: latest.pi_after ?? 0,
       penalty_before: latest.penalty_for_next ?? 0,
-
-      // Start AFTER equal to BEFORE (delta = 0 until edited)
       cp_after: latest.cp_after ?? 0,
       pi_after: latest.pi_after ?? 0,
       penalty_for_next: latest.penalty_for_next ?? 0
     };
   });
 
-  // 5) Insert default rows
-  const { error: insertError } = await supabaseClient
-    .from('results')
-    .insert(rowsToInsert);
-
-  if (insertError) {
-    console.error('Error inserting default results:', insertError.message);
-  }
-}
-
-
-  // Build "latest per driver" map
-  const latestByDriver = {};
-  for (const row of prevResults || []) {
-    const dId = row.driver_id;
-    const round = row.races?.round_number ?? 0;
-
-    if (!latestByDriver[dId] || round > (latestByDriver[dId].races?.round_number ?? 0)) {
-      latestByDriver[dId] = row;
-    }
-  }
-
-  // 4) Prepare insert rows
-  const rowsToInsert = driverRows.map(d => {
-    const latest = latestByDriver[d.id];
-
-    if (!latest) {
-      // No previous race for this driver:
-      // Race 1 → all "before" start at 0, user can edit PI manually.
-      return {
-        driver_id: d.id,
-        race_id: raceId,
-        cp_before: 0,
-        pi_before: 0,
-        penalty_before: 0,
-        cp_after: 0,
-        pi_after: 0,
-        penalty_for_next: 0
-      };
-    } else {
-      // There is a previous race:
-      // prefill "before" with previous AFTER values
-      return {
-        driver_id: d.id,
-        race_id: raceId,
-        cp_before: latest.cp_after ?? 0,
-        pi_before: latest.pi_after ?? 0,
-        penalty_before: latest.penalty_for_next ?? 0,
-
-        // start "after" equal to "before" (so delta = 0 until edited)
-        cp_after: latest.cp_after ?? 0,
-        pi_after: latest.pi_after ?? 0,
-        penalty_for_next: latest.penalty_for_next ?? 0
-      };
-    }
-  });
-
-  // 5) Insert all default rows for this race
+  // 5) Insert
   const { error: insertError } = await supabaseClient
     .from('results')
     .insert(rowsToInsert);
@@ -419,7 +357,6 @@ function indexResultsByDriverAndRace(results) {
 }
 
 async function createRace(name, dateString) {
-  // STEP 1: Find highest round number
   const { data: existing, error: fetchError } = await supabaseClient
     .from('races')
     .select('round_number')
@@ -436,11 +373,9 @@ async function createRace(name, dateString) {
   const maxRound = existing && existing.length > 0 ? existing[0].round_number : 0;
   const nextRound = (maxRound || 0) + 1;
 
-  // STEP 2: Decide name + date
-  const displayName = name && name.trim() ? name.trim() : `Race ${nextRound}`;
-  const raceDate = dateString && dateString.trim() ? dateString.trim() : null;
+  const displayName = name?.trim() || `Race ${nextRound}`;
+  const raceDate = dateString?.trim() || null;
 
-  // STEP 3: Insert the race and return its ID
   const { data: newRace, error: insertError } = await supabaseClient
     .from('races')
     .insert({
@@ -458,8 +393,6 @@ async function createRace(name, dateString) {
     return;
   }
 
-  // STEP 4: Create default results for every driver,
-  // using previous races to prefill the "before" row.
   await createDefaultResultsForRace(newRace.id, nextRound);
 
   return newRace;
