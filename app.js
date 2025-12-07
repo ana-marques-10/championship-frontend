@@ -1,6 +1,23 @@
 // We use the global supabaseClient created in index.html
 
 let drivers = []; // will be filled from DB
+let isAdmin = false;
+
+async function refreshAdminStatus() {
+  const { data: { user }, error } = await supabaseClient.auth.getUser();
+  if (error || !user) {
+    isAdmin = false;
+    return;
+  }
+
+  const { data, error: adminError } = await supabaseClient
+    .from('admins')
+    .select('user_id')
+    .eq('user_id', user.id)
+    .maybeSingle();
+
+  isAdmin = !adminError && !!data;
+}
 
 async function fetchDrivers() {
   const { data, error } = await supabaseClient
@@ -102,7 +119,7 @@ async function fetchRaces() {
 async function fetchAllResults() {
   const { data, error } = await supabaseClient
     .from('results')
-    .select('*');
+    .select('id, driver_id, race_id, cp_before, pi_before, penalty_before, cp_after, pi_after, penalty_for_next');
 
   if (error) {
     console.error('Error fetching all results:', error.message);
@@ -113,13 +130,11 @@ async function fetchAllResults() {
 }
 
 function indexResultsByDriverAndRace(results) {
-  const map = {}; // key: driverId_raceId
-
+  const map = {};
   for (const r of results) {
     const key = `${r.driver_id}_${r.race_id}`;
     map[key] = r;
   }
-
   return map;
 }
 
@@ -130,12 +145,12 @@ function renderGrid(drivers, races, resultMap) {
   headerRow.innerHTML = '';
   tbody.innerHTML = '';
 
-  // Header: first cell is the "Drivers" column
+  // Header: first column is the driver info
   const firstTh = document.createElement('th');
   firstTh.textContent = 'Driver / Race';
   headerRow.appendChild(firstTh);
 
-  // Then one header cell per race, left to right
+  // One header per race
   for (const race of races) {
     const th = document.createElement('th');
     const raceLabel = race.name ? race.name : `Race ${race.round_number}`;
@@ -147,11 +162,10 @@ function renderGrid(drivers, races, resultMap) {
     headerRow.appendChild(th);
   }
 
-  // Body: one row per driver (in current standings order)
+  // One row per driver
   for (const driver of drivers) {
     const tr = document.createElement('tr');
 
-    // Left cell: place, name, car, and current CP/PI after penalty
     const leftTd = document.createElement('td');
     const placeText = driver.place ? `${driver.place}. ` : '';
     const effectivePi = driver.effective_pi ?? driver.current_pi ?? 0;
@@ -165,7 +179,7 @@ function renderGrid(drivers, races, resultMap) {
     `;
     tr.appendChild(leftTd);
 
-    // Then one cell per race for this driver
+    // Each race cell
     for (const race of races) {
       const td = document.createElement('td');
       const key = `${driver.id}_${race.id}`;
@@ -182,19 +196,36 @@ function renderGrid(drivers, races, resultMap) {
         const piAfter    = r.pi_after ?? piBefore;
         const penNext    = r.penalty_for_next ?? penBefore;
 
-        // This-race change
         const dCp  = cpAfter - cpBefore;
         const dPi  = piAfter - piBefore;
         const dPen = penNext - penBefore;
 
-        // Top: per-race change
-        // Bottom: current values before this race
-        td.innerHTML = `
-          <div>${dCp} | ${dPi} | ${dPen}</div>
-          <div style="font-size:0.85em; opacity:0.8;">
-            ${cpBefore} | ${piBefore} | ${penBefore}
-          </div>
-        `;
+        if (!isAdmin) {
+          // read-only view
+          td.innerHTML = `
+            <div>${dCp} | ${dPi} | ${dPen}</div>
+            <div style="font-size:0.85em; opacity:0.8;">
+              ${cpBefore} | ${piBefore} | ${penBefore}
+            </div>
+          `;
+        } else {
+          // editable mini-grid
+          td.innerHTML = `
+            <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:2px; margin-bottom:2px;">
+              <input type="number" id="cp_after_${r.id}" value="${cpAfter}"  style="width:100%; box-sizing:border-box;" />
+              <input type="number" id="pi_after_${r.id}" value="${piAfter}"  style="width:100%; box-sizing:border-box;" />
+              <input type="number" id="pen_next_${r.id}" value="${penNext}"  style="width:100%; box-sizing:border-box;" />
+            </div>
+            <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:2px; font-size:0.85em;">
+              <input type="number" id="cp_before_${r.id}" value="${cpBefore}" style="width:100%; box-sizing:border-box;" />
+              <input type="number" id="pi_before_${r.id}" value="${piBefore}" style="width:100%; box-sizing:border-box;" />
+              <input type="number" id="pen_before_${r.id}" value="${penBefore}" style="width:100%; box-sizing:border-box;" />
+            </div>
+            <button class="cell-save" data-result-id="${r.id}" style="margin-top:2px; font-size:0.75em;">
+              Save
+            </button>
+          `;
+        }
       }
 
       tr.appendChild(td);
@@ -202,6 +233,36 @@ function renderGrid(drivers, races, resultMap) {
 
     tbody.appendChild(tr);
   }
+}
+
+async function saveResultFromCell(resultId) {
+  const cpBefore  = parseInt(document.getElementById(`cp_before_${resultId}`).value || '0', 10);
+  const piBefore  = parseInt(document.getElementById(`pi_before_${resultId}`).value || '0', 10);
+  const penBefore = parseInt(document.getElementById(`pen_before_${resultId}`).value || '0', 10);
+
+  const cpAfter   = parseInt(document.getElementById(`cp_after_${resultId}`).value || '0', 10);
+  const piAfter   = parseInt(document.getElementById(`pi_after_${resultId}`).value || '0', 10);
+  const penNext   = parseInt(document.getElementById(`pen_next_${resultId}`).value || '0', 10);
+
+  const { error } = await supabaseClient
+    .from('results')
+    .update({
+      cp_before: cpBefore,
+      pi_before: piBefore,
+      penalty_before: penBefore,
+      cp_after: cpAfter,
+      pi_after: piAfter,
+      penalty_for_next: penNext,
+    })
+    .eq('id', resultId);
+
+  if (error) {
+    console.error('Error saving result:', error.message);
+    alert('Save failed: ' + error.message);
+    return;
+  }
+
+  await updateStandings();
 }
 
 // --- Auth (basic email/password) ---
@@ -218,7 +279,6 @@ async function login() {
   const status = document.getElementById('login-status');
 
   if (error) {
-    console.error('Login error:', error.message);
     status.textContent = 'Login failed: ' + error.message;
     return;
   }
@@ -226,31 +286,52 @@ async function login() {
   status.textContent = 'Logged in as: ' + email;
   document.getElementById('login-button').style.display = 'none';
   document.getElementById('logout-button').style.display = 'inline-block';
+
+  await refreshAdminStatus();
+  await updateStandings(); // redraw with edit controls if admin
 }
 
 async function logout() {
   await supabaseClient.auth.signOut();
+  isAdmin = false;
+
   document.getElementById('login-status').textContent = 'Logged out.';
   document.getElementById('login-button').style.display = 'inline-block';
   document.getElementById('logout-button').style.display = 'none';
+
+  await updateStandings(); // redraw without edit controls
 }
 
 // Attach event listeners after DOM is ready
 document.addEventListener('DOMContentLoaded', async () => {
-  document
-    .getElementById('update-standings-button')
-    .addEventListener('click', updateStandings);
+  const updateBtn = document.getElementById('update-standings-button');
+  if (updateBtn) {
+    updateBtn.addEventListener('click', updateStandings);
+  }
 
-  document
-    .getElementById('login-button')
-    .addEventListener('click', login);
+  const loginBtn = document.getElementById('login-button');
+  if (loginBtn) {
+    loginBtn.addEventListener('click', login);
+  }
 
-  document
-    .getElementById('logout-button')
-    .addEventListener('click', logout);
+  const logoutBtn = document.getElementById('logout-button');
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', logout);
+  }
 
-  // Initial load of drivers
+  // event delegation for Save buttons inside cells
+  const gridBody = document.getElementById('grid-body');
+  if (gridBody) {
+    gridBody.addEventListener('click', (e) => {
+      const btn = e.target.closest('.cell-save');
+      if (!btn) return;
+      const id = btn.dataset.resultId;
+      saveResultFromCell(id);
+    });
+  }
+
+  await refreshAdminStatus();
   drivers = await fetchDrivers();
-  // First render (no standings yet) or you can immediately call updateStandings
   await updateStandings();
 });
+
