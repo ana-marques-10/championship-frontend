@@ -20,6 +20,39 @@ async function refreshAdminStatus() {
   isAdmin = !adminError && !!data;
 }
 
+async function createDefaultResultsForRace(raceId) {
+  // fetch all drivers in the current championship
+  const { data: drivers, error } = await supabaseClient
+    .from('drivers')
+    .select('id')
+    .eq('championship_id', CURRENT_CHAMPIONSHIP_ID);
+
+  if (error) {
+    console.error('Error fetching drivers:', error.message);
+    return;
+  }
+
+  const rows = drivers.map(d => ({
+    driver_id: d.id,
+    race_id: raceId,
+    cp_before: 0,
+    pi_before: 0,
+    penalty_before: 0,
+    cp_after: 0,
+    pi_after: 0,
+    penalty_for_next: 0
+  }));
+
+  const { error: insertError } = await supabaseClient
+    .from('results')
+    .insert(rows);
+
+  if (insertError) {
+    console.error('Error inserting default results:', insertError.message);
+  }
+}
+
+
 async function createDriver(name, car) {
   const { error } = await supabaseClient
     .from('drivers')
@@ -255,7 +288,7 @@ function indexResultsByDriverAndRace(results) {
 }
 
 async function createRace(name, dateString) {
-  // get current max round_number for this championship
+  // STEP 1: Find highest round number
   const { data: existing, error: fetchError } = await supabaseClient
     .from('races')
     .select('round_number')
@@ -265,9 +298,39 @@ async function createRace(name, dateString) {
 
   if (fetchError) {
     console.error('Error reading races:', fetchError.message);
-    alert('Could not read races: ' + fetchError.message);
+    alert('Could not load races: ' + fetchError.message);
     return;
   }
+
+  const maxRound = existing && existing.length > 0 ? existing[0].round_number : 0;
+  const nextRound = (maxRound || 0) + 1;
+
+  // STEP 2: Decide name + date
+  const displayName = name && name.trim() ? name.trim() : `Race ${nextRound}`;
+  const raceDate = dateString && dateString.trim() ? dateString.trim() : null;
+
+  // STEP 3: Insert the race and return its ID
+  const { data: newRace, error: insertError } = await supabaseClient
+    .from('races')
+    .insert({
+      round_number: nextRound,
+      name: displayName,
+      race_date: raceDate,
+      championship_id: CURRENT_CHAMPIONSHIP_ID
+    })
+    .select()
+    .single();   // IMPORTANT: gets the inserted race
+
+  if (insertError) {
+    console.error('Error creating race:', insertError.message);
+    alert('Could not create race: ' + insertError.message);
+    return;
+  }
+
+  // STEP 4: Automatically create default results for every driver
+  await createDefaultResultsForRace(newRace.id);
+}
+
 
   const maxRound = existing && existing.length > 0 ? existing[0].round_number : 0;
   const nextRound = (maxRound || 0) + 1;
