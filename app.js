@@ -1,4 +1,5 @@
 // We use the global supabaseClient created in index.html
+const CURRENT_CHAMPIONSHIP_ID = 'b24ca658-861d-469b-8e14-419267b728ff';
 
 let drivers = []; // will be filled from DB
 let isAdmin = false;
@@ -23,7 +24,8 @@ async function fetchDrivers() {
   const { data, error } = await supabaseClient
     .from('drivers')
     .select('*')
-    .eq('active', true);
+    .eq('active', true)
+    .eq('championship_id', CURRENT_CHAMPIONSHIP_ID);
 
   if (error) {
     console.error('Error fetching drivers:', error.message);
@@ -106,6 +108,7 @@ async function fetchRaces() {
   const { data, error } = await supabaseClient
     .from('races')
     .select('*')
+    .eq('championship_id', CURRENT_CHAMPIONSHIP_ID)
     .order('round_number', { ascending: true });
 
   if (error) {
