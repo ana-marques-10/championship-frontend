@@ -223,7 +223,9 @@ async function fetchDrivers() {
 async function fetchLatestResultsPerDriver() {
   const { data, error } = await supabaseClient
     .from('results')
-    .select('driver_id, cp_after, pi_after, penalty_for_next, races(round_number)');
+    .select(
+      'driver_id, cp_before, cp_after, pi_before, pi_after, penalty_for_next, races(round_number)'
+    );
 
   if (error) {
     console.error('Error fetching results:', error.message);
@@ -254,20 +256,26 @@ function computeStandings(drivers, latestResultsByDriver) {
       driver.current_penalty = 0;
       driver.effective_pi = 0;
     } else {
-      const cpAfter = latest.cp_after ?? 0;
-      const piAfter = latest.pi_after ?? 0;
-      const penaltyNext = latest.penalty_for_next ?? 0;
+      const cpBefore = latest.cp_before ?? 0;
+      const cpAfter  = latest.cp_after  ?? 0;
+      const piBefore = latest.pi_before ?? 0;
+      const piAfter  = latest.pi_after  ?? 0;
+      const penNext  = latest.penalty_for_next ?? 0;
 
-      driver.current_cp = cpAfter;
-      driver.current_pi = piAfter;
-      driver.current_penalty = penaltyNext;
+      const totalCp = cpBefore + cpAfter;
+      const totalPi = piBefore + piAfter;
 
-      // Penalty applies to PI (max tuning points)
-      driver.effective_pi = Math.max(0, piAfter - penaltyNext);
+      // totals used for left column
+      driver.current_cp = totalCp;
+      driver.current_pi = totalPi;
+      driver.current_penalty = penNext;
+
+      // “effective” PI after applying NEXT penalty, if you want to show it
+      driver.effective_pi = Math.max(0, totalPi - penNext);
     }
   }
 
-  // CP decides the place
+  // order drivers by TOTAL CP (descending)
   drivers.sort((a, b) => b.current_cp - a.current_cp);
 
   let place = 1;
