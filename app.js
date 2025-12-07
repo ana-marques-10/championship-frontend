@@ -20,22 +20,8 @@ async function refreshAdminStatus() {
   isAdmin = !adminError && !!data;
 }
 
-async function createDefaultResultsForRace(raceId) {
-  // 1) Get round_number for this race
-  const { data: race, error: raceError } = await supabaseClient
-    .from('races')
-    .select('round_number')
-    .eq('id', raceId)
-    .single();
-
-  if (raceError) {
-    console.error('Error fetching race info:', raceError.message);
-    return;
-  }
-
-  const currentRound = race.round_number;
-
-  // 2) Get all active drivers in this championship
+async function createDefaultResultsForRace(raceId, roundNumber) {
+  // 1) All active drivers for this championship
   const { data: driverRows, error: driversError } = await supabaseClient
     .from('drivers')
     .select('id')
@@ -47,17 +33,99 @@ async function createDefaultResultsForRace(raceId) {
     return;
   }
 
-  // 3) Get the latest result *before* this round for each driver
-  //    (so we can prefill cp_before/pi_before/penalty_before)
-  const { data: prevResults, error: prevError } = await supabaseClient
-    .from('results')
-    .select('driver_id, cp_after, pi_after, penalty_for_next, races(round_number)')
-    .lt('races.round_number', currentRound); // only earlier rounds
+  // 2) All earlier races in this championship
+  const { data: previousRaces, error: prevRaceError } = await supabaseClient
+    .from('races')
+    .select('id, round_number')
+    .eq('championship_id', CURRENT_CHAMPIONSHIP_ID)
+    .lt('round_number', roundNumber);
 
-  if (prevError) {
-    console.error('Error fetching previous results:', prevError.message);
+  if (prevRaceError) {
+    console.error('Error fetching previous races:', prevRaceError.message);
     return;
   }
+
+  const raceIdToRound = {};
+  const previousRaceIds = [];
+  for (const r of previousRaces || []) {
+    raceIdToRound[r.id] = r.round_number;
+    previousRaceIds.push(r.id);
+  }
+
+  // 3) Latest result per driver from previous races
+  const latestByDriver = {};
+
+  if (previousRaceIds.length > 0) {
+    const { data: prevResults, error: prevResError } = await supabaseClient
+      .from('results')
+      .select('driver_id, race_id, cp_after, pi_after, penalty_for_next')
+      .in('race_id', previousRaceIds);
+
+    if (prevResError) {
+      console.error('Error fetching previous results:', prevResError.message);
+      return;
+    }
+
+    for (const row of prevResults || []) {
+      const dId = row.driver_id;
+      const rId = row.race_id;
+      const round = raceIdToRound[rId] || 0;
+
+      if (!latestByDriver[dId] || round > latestByDriver[dId].round_number) {
+        latestByDriver[dId] = {
+          round_number: round,
+          cp_after: row.cp_after,
+          pi_after: row.pi_after,
+          penalty_for_next: row.penalty_for_next
+        };
+      }
+    }
+  }
+
+  // 4) Build rows to insert for the new race
+  const rowsToInsert = driverRows.map(d => {
+    const latest = latestByDriver[d.id];
+
+    if (!latest) {
+      // First race for this driver: "before" starts at 0
+      return {
+        driver_id: d.id,
+        race_id: raceId,
+        cp_before: 0,
+        pi_before: 0,
+        penalty_before: 0,
+        cp_after: 0,
+        pi_after: 0,
+        penalty_for_next: 0
+      };
+    }
+
+    // Later races: carry over previous AFTER values
+    return {
+      driver_id: d.id,
+      race_id: raceId,
+
+      cp_before: latest.cp_after ?? 0,
+      pi_before: latest.pi_after ?? 0,
+      penalty_before: latest.penalty_for_next ?? 0,
+
+      // Start AFTER equal to BEFORE (delta = 0 until edited)
+      cp_after: latest.cp_after ?? 0,
+      pi_after: latest.pi_after ?? 0,
+      penalty_for_next: latest.penalty_for_next ?? 0
+    };
+  });
+
+  // 5) Insert default rows
+  const { error: insertError } = await supabaseClient
+    .from('results')
+    .insert(rowsToInsert);
+
+  if (insertError) {
+    console.error('Error inserting default results:', insertError.message);
+  }
+}
+
 
   // Build "latest per driver" map
   const latestByDriver = {};
@@ -390,12 +458,13 @@ async function createRace(name, dateString) {
     return;
   }
 
-  // STEP 4: Automatically create default results for every driver
-  // Pass nextRound so we know which earlier results to sum from
+  // STEP 4: Create default results for every driver,
+  // using previous races to prefill the "before" row.
   await createDefaultResultsForRace(newRace.id, nextRound);
 
   return newRace;
 }
+
 
 function renderGrid(drivers, races, resultMap) {
   const headerRow = document.getElementById('grid-header-row');
