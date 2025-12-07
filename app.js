@@ -17,31 +17,24 @@ async function fetchDrivers() {
 }
 
 async function fetchLatestResultsPerDriver() {
-  // We get results joined with races (for round_number)
   const { data, error } = await supabaseClient
     .from('results')
-    .select('driver_id, cp_after, pi_after, penalty_for_next, races(round_number)')
-    .order('races.round_number', { ascending: true });
+    .select('driver_id, cp_after, pi_after, penalty_for_next, races(round_number)');
+    // remove the .order(...) line completely
 
   if (error) {
     console.error('Error fetching results:', error.message);
     return {};
   }
 
-  // latest[driver_id] = latest row
   const latest = {};
 
   for (const row of data) {
     const dId = row.driver_id;
     const round = row.races?.round_number ?? 0;
 
-    if (!latest[dId]) {
+    if (!latest[dId] || round > (latest[dId].races?.round_number ?? 0)) {
       latest[dId] = row;
-    } else {
-      const currentRound = latest[dId].races?.round_number ?? 0;
-      if (round > currentRound) {
-        latest[dId] = row;
-      }
     }
   }
 
