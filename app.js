@@ -113,9 +113,126 @@ function renderStandings(drivers) {
 }
 
 async function updateStandings() {
+  // 1) latest results per driver → standings
   const latest = await fetchLatestResultsPerDriver();
   computeStandings(drivers, latest);
   renderStandings(drivers);
+
+  // 2) championship grid
+  const races = await fetchRaces();
+  const allResults = await fetchAllResults();
+  const resultMap = indexResultsByRaceAndDriver(allResults);
+  renderGrid(drivers, races, resultMap);
+}
+
+
+async function fetchRaces() {
+  const { data, error } = await supabaseClient
+    .from('races')
+    .select('*')
+    .order('round_number', { ascending: true });
+
+  if (error) {
+    console.error('Error fetching races:', error.message);
+    return [];
+  }
+
+  return data;
+}
+
+async function fetchAllResults() {
+  const { data, error } = await supabaseClient
+    .from('results')
+    .select('*');
+
+  if (error) {
+    console.error('Error fetching all results:', error.message);
+    return [];
+  }
+
+  return data;
+}
+
+function indexResultsByRaceAndDriver(results) {
+  const map = {}; // key: `${race_id}_${driver_id}`
+
+  for (const r of results) {
+    const key = `${r.race_id}_${r.driver_id}`;
+    map[key] = r;
+  }
+
+  return map;
+}
+
+function renderGrid(drivers, races, resultMap) {
+  const headerRow = document.getElementById('grid-header-row');
+  const tbody = document.getElementById('grid-body');
+
+  headerRow.innerHTML = '';
+  tbody.innerHTML = '';
+
+  // Header: first cell "Race"
+  const raceHeaderTh = document.createElement('th');
+  raceHeaderTh.textContent = 'Race';
+  headerRow.appendChild(raceHeaderTh);
+
+  // Then one cell per driver (in current standings order)
+  for (const driver of drivers) {
+    const th = document.createElement('th');
+    const placeText = driver.place ? `${driver.place}. ` : '';
+
+    th.innerHTML = `
+      <div>${placeText}${driver.name}</div>
+      <div style="font-size: 0.85em; opacity: 0.8;">${driver.car}</div>
+    `;
+    headerRow.appendChild(th);
+  }
+
+  // Body: one row per race
+  for (const race of races) {
+    const tr = document.createElement('tr');
+
+    const raceCell = document.createElement('td');
+    const raceLabel = race.name ? race.name : `Race ${race.round_number}`;
+    raceCell.textContent = raceLabel;
+    tr.appendChild(raceCell);
+
+    // One cell per driver
+    for (const driver of drivers) {
+      const td = document.createElement('td');
+      const key = `${race.id}_${driver.id}`;
+      const r = resultMap[key];
+
+      if (!r) {
+        td.innerHTML = '<div style="opacity:0.4;">-</div>';
+      } else {
+        const cpBefore = r.cp_before ?? '';
+        const piBefore = r.pi_before ?? '';
+        const penBefore = r.penalty_before ?? '';
+
+        const cpAfter = r.cp_after ?? '';
+        const piAfter = r.pi_after ?? '';
+        const penNext = r.penalty_for_next ?? '';
+
+        td.innerHTML = `
+          <div>
+            CP: <strong>${cpAfter}</strong>,
+            PI: <strong>${piAfter}</strong>,
+            Penalty→ <strong>${penNext}</strong>
+          </div>
+          <div style="font-size:0.85em; opacity:0.8;">
+            Prev CP: ${cpBefore},
+            Prev PI: ${piBefore},
+            Prev Pen: ${penBefore}
+          </div>
+        `;
+      }
+
+      tr.appendChild(td);
+    }
+
+    tbody.appendChild(tr);
+  }
 }
 
 // --- Auth (basic email/password) ---
